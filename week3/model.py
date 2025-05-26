@@ -24,34 +24,50 @@ class PositionalEncoding(nn.Module):
         x = x + self.pe[:x.size(0)]
         return self.dropout(x)
 
+# Embedding (vocab_size → d_model)
+#    ↓
+# PositionalEncoding (加上位置資訊)
+#    ↓
+# TransformerEncoderLayer × N (num_layers)層：
+# 將encoder_layer區塊複製堆疊 num_layers 次
+#     └─ MultiHeadAttention (input/output: d_model)
+#     └─ FeedForward (d_model → dim_feedforward → d_model)
+#    ↓
+# Linear (d_model → vocab_size)
+
 class TransformerModel(nn.Module):
-    def __init__(self, vocab_size, d_model=128, nhead=4, num_layers=3, dim_feedforward=256, dropout=0.2):
+    def __init__(self, vocab_size, d_model=128, nhead=4, num_layers=2, dim_feedforward=256, dropout=0.2):
         super().__init__()
         self.model_type = 'Transformer'
         self.pos_encoder = PositionalEncoding(d_model, dropout)
         encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers)
-        self.embedding = nn.Embedding(vocab_size, d_model)
+        self.embedding = nn.Embedding(vocab_size, d_model, padding_idx=0)
         self.d_model = d_model
         self.linear = nn.Linear(d_model, vocab_size)
 
         self._init_weights()
 
+    # 初始化Embedding層 及 輸出Linear層的權重
+    # 不包含Transformer Encoder Layer 的權重(由 PyTorch 預設自動初始化)
     def _init_weights(self):
         initrange = 0.1
         self.embedding.weight.data.uniform_(-initrange, initrange)
         self.linear.bias.data.zero_()
         self.linear.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, src: Tensor, src_mask: Tensor = None) -> Tensor:
+    def forward(self, src: Tensor, src_mask: Tensor = None, src_key_padding_mask: Tensor = None) -> Tensor:
         src = self.embedding(src) * math.sqrt(self.d_model)
         src = self.pos_encoder(src)
-        output = self.transformer_encoder(src, src_mask)
+        output = self.transformer_encoder(src, src_mask, src_key_padding_mask)
         output = self.linear(output)
         return output
 
 def generate_square_subsequent_mask(sz: int) -> Tensor:
     return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
+
+def generate_padding_mask(src: Tensor, pad_idx=0) -> Tensor:
+    return (src.transpose(0,1) == pad_idx)
 
 def evaluate(model, data_loader, loss_fn, vocab_size, device):
     model.eval()
@@ -63,13 +79,15 @@ def evaluate(model, data_loader, loss_fn, vocab_size, device):
             targets = batch_data[:, 1:].transpose(0,1)
 
             src_mask = generate_square_subsequent_mask(inputs.size(0)).to(device)
-            output = model(inputs, src_mask)
+            src_key_padding_mask = generate_padding_mask(inputs).to(device)
+            output = model(inputs, src_mask, src_key_padding_mask)
             loss = loss_fn(output.view(-1, vocab_size), targets.reshape(-1))
             total_loss += loss.item()
     return total_loss / len(data_loader)
 
 def sample_next_token(logits):
     probs = torch.softmax(logits, dim=-1)
+    # 根據機率分布隨機抽樣一個 token（這是隨機取樣，而非最大機率選擇）
     next_token = torch.multinomial(probs, 1)
     return next_token.item()
 
@@ -84,7 +102,8 @@ def generate_sentence(model, vocab, idx2word, device, max_len):
 
         for _ in range(max_len - 1):
             src_mask = generate_square_subsequent_mask(input_tensor.size(0)).to(device)
-            output = model(input_tensor, src_mask)
+            src_key_padding_mask = generate_padding_mask(input_tensor).to(device)
+            output = model(input_tensor, src_mask, src_key_padding_mask)
             logits = output[-1, 0, :]
             next_token_id = sample_next_token(logits)
 
@@ -149,9 +168,10 @@ for epoch in range(epochs):
         targets = batch_data[:, 1:].transpose(0,1)
 
         src_mask = generate_square_subsequent_mask(inputs.size(0)).to(device)
-
+        src_key_padding_mask = generate_padding_mask(inputs).to(device)
+        
         optimizer.zero_grad()
-        output = model(inputs, src_mask)
+        output = model(inputs, src_mask, src_key_padding_mask)
         loss = loss_fn(output.view(-1, vocab_size), targets.reshape(-1))
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
