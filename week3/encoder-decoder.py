@@ -191,7 +191,7 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     verbose=True
 )
 
-epochs = 100
+epochs = 50
 for epoch in range(epochs):
     model.train()
     total_loss = 0
