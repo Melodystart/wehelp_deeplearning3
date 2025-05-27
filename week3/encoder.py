@@ -85,11 +85,25 @@ def evaluate(model, data_loader, loss_fn, vocab_size, device):
             total_loss += loss.item()
     return total_loss / len(data_loader)
 
-def sample_next_token(logits):
+# Top-p Sampling：從最大機率開始累加，直到總和超過p（例0.9），只在這些token中進行抽樣
+def sample_next_token(logits, p=0.9):
     probs = torch.softmax(logits, dim=-1)
-    # 根據機率分布隨機抽樣一個 token（這是隨機取樣，而非最大機率選擇）
-    next_token = torch.multinomial(probs, 1)
-    return next_token.item()
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+    cumulative_probs = torch.cumsum(sorted_probs, dim=0)
+    cutoff_index = torch.searchsorted(cumulative_probs, p).item()
+    filtered_probs = sorted_probs[:cutoff_index + 1]
+    filtered_indices = sorted_indices[:cutoff_index + 1]
+    filtered_probs = filtered_probs / torch.sum(filtered_probs)
+    next_token = torch.multinomial(filtered_probs, 1)
+    return filtered_indices[next_token].item()
+
+# Top-k Sampling：只從前k個機率最高的token中抽樣
+# def sample_next_token(logits, k=10):
+#     probs = torch.softmax(logits, dim=-1)
+#     topk_probs, topk_indices = torch.topk(probs, k)
+#     topk_probs = topk_probs / torch.sum(topk_probs)
+#     next_token = torch.multinomial(topk_probs, 1)
+#     return topk_indices[next_token].item()
 
 def generate_sentence(model, vocab, idx2word, device, max_len):
     model.eval()
