@@ -24,6 +24,41 @@ class PositionalEncoding(nn.Module):
         x = x + self.pe[:x.size(0)]
         return self.dropout(x)
 
+# src token → Embedding → PositionalEncoding → Encoder × N (區塊重複堆疊 N 次)→ memory (Encoder 處理完輸入句子後，提取出的語意特徵向量，包含上下文資訊)
+#                                                    ↓
+# tgt token → Embedding → PositionalEncoding → Decoder × N (含 masked attention)
+#                                                    ↓
+#                                        Linear (to vocab_size) 
+#                                                    ↓
+#                                                Logits (softmax前的分數，對所有詞彙的預測信心分數)
+
+### Encoder 部分
+# Source token index (batch_size 句子數量, src_seq_len 每句token數量)
+#     ↓
+# Embedding (vocab_size → d_model 每個詞彙的embedding vector維度)
+#     ↓
+# PositionalEncoding (加上位置資訊)
+#     ↓
+# TransformerEncoderLayer × num_encoder_layers 層 (區塊重複堆疊num_encoder_layers(N)次)：
+#     └─ Multi-Head Attention (input/output: d_model)
+#     └─ Feed Forward (d_model → dim_feedforward → d_model)
+#     ↓
+# memory (batch_size 句子數量, src_seq_len 每句token數量, d_model 每個詞彙的embedding vector維度)
+
+### Decoder 部分
+# Target token index (batch_size, tgt_seq_len)
+#     ↓
+# Embedding (vocab_size → d_model)
+#     ↓
+# PositionalEncoding (加上位置資訊)
+#     ↓
+# TransformerDecoderLayer × num_decoder_layers 層：
+#     └─ Masked Multi-Head Self Attention (自己跟自己注意，但遮住未來資訊)
+#     └─ Multi-Head Cross Attention (和Encoder輸出的memory做attention，即參考輸入句子的語意特徵）
+#     └─ Feed Forward (d_model → dim_feedforward → d_model，對每個位置特徵做非線性變換，增加模型表達能力)
+#     ↓
+# Decoder輸出 (batch_size 句子數量, tgt_seq_len 每句token數量, d_model 每個詞彙的embedding vector維度)
+
 class TransformerSeq2Seq(nn.Module):
     def __init__(self, vocab_size, d_model=128, nhead=4,
                  num_encoder_layers=4, num_decoder_layers=4,
@@ -155,7 +190,7 @@ word_freq = Counter(w for s in sentences for w in s)
 
 vocab = {"<PAD>": 0,  "<SOS>": 1, "<EOS>": 2, "<UNK>": 3}
 for word, freq in word_freq.items():
-    if freq >= 5:
+    if freq >= 10:
         vocab[word] = len(vocab)
 vocab_size = len(vocab)
 
@@ -182,6 +217,7 @@ val_loader = DataLoader(TensorDataset(val_tensor), batch_size=batch_size)
 
 model = TransformerSeq2Seq(vocab_size, pad_idx=vocab["<PAD>"]).to(device)
 loss_fn = nn.CrossEntropyLoss(ignore_index=vocab["<PAD>"], label_smoothing=0.1)
+# optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 optimizer = torch.optim.SGD(model.parameters(), lr=0.001, weight_decay=1e-4)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, 
@@ -191,7 +227,7 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     verbose=True
 )
 
-epochs = 50
+epochs = 30
 for epoch in range(epochs):
     model.train()
     total_loss = 0

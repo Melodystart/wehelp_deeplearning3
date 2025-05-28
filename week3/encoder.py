@@ -29,9 +29,9 @@ class PositionalEncoding(nn.Module):
 # PositionalEncoding (加上位置資訊)
 #    ↓
 # TransformerEncoderLayer × N (num_layers)層：
-# 將encoder_layer區塊複製堆疊 num_layers 次
-#     └─ MultiHeadAttention (input/output: d_model)
-#     └─ FeedForward (d_model → dim_feedforward → d_model)
+# 將encoder_layer區塊重複堆疊 num_layers 次
+#     └─ Multi-Head Attention (input/output: d_model)
+#     └─ Feed Forward (d_model → dim_feedforward → d_model)
 #    ↓
 # Linear (d_model → vocab_size)
 
@@ -164,6 +164,7 @@ val_loader = DataLoader(TensorDataset(val_tensor), batch_size=batch_size)
 model = TransformerModel(vocab_size).to(device)
 loss_fn = nn.CrossEntropyLoss(ignore_index=vocab["<PAD>"], label_smoothing=0.1)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+# optimizer = torch.optim.SGD(model.parameters(), lr=0.001, weight_decay=1e-4)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, 
     mode='min',
